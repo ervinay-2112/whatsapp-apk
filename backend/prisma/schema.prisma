@@ -1,0 +1,344 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== USER MODELS ====================
+
+model User {
+  id        String     @id @default(cuid())
+  email     String     @unique
+  password  String
+  firstName String
+  lastName  String
+  role      UserRole   @default(STAFF)
+  isActive  Boolean    @default(true)
+  lastLogin DateTime?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  // Relations
+  customers Customer[]
+  renewals  Renewal[]
+  messageLogs MessageLog[]
+
+  @@index([email])
+  @@index([role])
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  STAFF
+}
+
+// ==================== CUSTOMER MODELS ====================
+
+model Customer {
+  id                  String     @id @default(cuid())
+  customerId          String     @unique
+  fullName            String
+  mobileNumber        String
+  alternateMobileNumber String?
+  email               String?
+  address             String?
+  area                String?
+  connectionId        String     @unique
+  routerMacAddress    String?
+  installationDate    DateTime
+  planId              String
+  planName            String
+  planCost            Float
+  planDuration        Int        // in days
+  startDate           DateTime
+  expiryDate          DateTime
+  status              CustomerStatus @default(ACTIVE)
+  notes               String?
+  createdBy           String
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+
+  // Relations
+  plan                Plan       @relation(fields: [planId], references: [id], onDelete: Cascade)
+  createdByUser       User       @relation(fields: [createdBy], references: [id])
+  renewals            Renewal[]
+  payments            Payment[]
+  messageLogs         MessageLog[]
+  notifications       Notification[]
+  reminders           ReminderLog[]
+
+  @@index([customerId])
+  @@index([connectionId])
+  @@index([expiryDate])
+  @@index([status])
+  @@index([createdBy])
+}
+
+enum CustomerStatus {
+  ACTIVE
+  EXPIRED
+  SUSPENDED
+}
+
+// ==================== PLAN MODELS ====================
+
+model Plan {
+  id          String   @id @default(cuid())
+  planName    String   @unique
+  speed       String   // e.g., "50 Mbps"
+  price       Float
+  duration    Int      // in days (30, 90, 180, 365)
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  customers   Customer[]
+  renewals    Renewal[]
+
+  @@index([planName])
+  @@index([duration])
+}
+
+// ==================== RENEWAL MODELS ====================
+
+model Renewal {
+  id              String   @id @default(cuid())
+  customerId      String
+  oldPlanId       String
+  newPlanId       String
+  oldExpiryDate   DateTime
+  newExpiryDate   DateTime
+  renewalDate     DateTime @default(now())
+  renewalType     RenewalType
+  amount          Float
+  notes           String?
+  renewedBy       String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  customer        Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  oldPlan         Plan     @relation(fields: [oldPlanId], references: [id])
+  newPlan         Plan     @relation(fields: [newPlanId], references: [id])
+  renewedByUser   User     @relation(fields: [renewedBy], references: [id])
+  payment         Payment?
+  invoices        Invoice[]
+
+  @@index([customerId])
+  @@index([renewalDate])
+}
+
+enum RenewalType {
+  AUTO
+  MANUAL
+  GRACE
+}
+
+// ==================== PAYMENT MODELS ====================
+
+model Payment {
+  id              String   @id @default(cuid())
+  customerId      String
+  renewalId       String   @unique
+  amount          Float
+  paymentMethod   PaymentMethod
+  transactionId   String   @unique
+  status          PaymentStatus @default(PENDING)
+  paymentDate     DateTime?
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  customer        Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  renewal         Renewal  @relation(fields: [renewalId], references: [id], onDelete: Cascade)
+  invoice         Invoice?
+
+  @@index([customerId])
+  @@index([transactionId])
+  @@index([status])
+}
+
+enum PaymentMethod {
+  RAZORPAY
+  UPI
+  CASH
+  CHEQUE
+  BANK_TRANSFER
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+// ==================== INVOICE MODELS ====================
+
+model Invoice {
+  id              String   @id @default(cuid())
+  invoiceNumber   String   @unique
+  customerId      String
+  renewalId       String
+  paymentId       String?
+  amount          Float
+  taxAmount       Float    @default(0)
+  totalAmount     Float
+  invoiceDate     DateTime @default(now())
+  dueDate         DateTime
+  paidDate        DateTime?
+  status          InvoiceStatus @default(PENDING)
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  renewal         Renewal  @relation(fields: [renewalId], references: [id], onDelete: Cascade)
+  payment         Payment? @relation(fields: [paymentId], references: [id])
+
+  @@index([invoiceNumber])
+  @@index([customerId])
+  @@index([status])
+}
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+// ==================== NOTIFICATION MODELS ====================
+
+model MessageLog {
+  id              String   @id @default(cuid())
+  customerId      String
+  sentByUser      String
+  messageType     MessageType
+  channelType     ChannelType
+  phoneNumber     String
+  messageContent  String
+  templateId      String?
+  status          MessageStatus @default(PENDING)
+  sentDate        DateTime?
+  deliveredDate   DateTime?
+  failureReason   String?
+  retryCount      Int      @default(0)
+  maxRetries      Int      @default(3)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  customer        Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  sentByUser_rel  User     @relation(fields: [sentByUser], references: [id])
+
+  @@index([customerId])
+  @@index([status])
+  @@index([sentDate])
+  @@index([messageType])
+}
+
+enum MessageType {
+  EXPIRY_7_DAYS
+  EXPIRY_3_DAYS
+  EXPIRED_TODAY
+  OVERDUE_3_DAYS
+  OVERDUE_7_DAYS
+  RENEWAL_CONFIRMATION
+  CUSTOM
+}
+
+enum ChannelType {
+  WHATSAPP
+  SMS
+  EMAIL
+  PUSH_NOTIFICATION
+}
+
+enum MessageStatus {
+  PENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+// ==================== NOTIFICATION MODELS ====================
+
+model Notification {
+  id              String   @id @default(cuid())
+  customerId      String
+  title           String
+  body            String
+  actionUrl       String?
+  isRead          Boolean  @default(false)
+  readAt          DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  customer        Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@index([isRead])
+}
+
+// ==================== REMINDER MODELS ====================
+
+model ReminderLog {
+  id              String   @id @default(cuid())
+  customerId      String
+  reminderType    ReminderType
+  reminderDate    DateTime
+  isPending       Boolean  @default(true)
+  status          ReminderStatus @default(PENDING)
+  executedAt      DateTime?
+  failureReason   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  customer        Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@index([reminderDate])
+  @@index([status])
+}
+
+enum ReminderType {
+  EXPIRY_7_DAYS
+  EXPIRY_3_DAYS
+  EXPIRED_TODAY
+  OVERDUE_3_DAYS
+  OVERDUE_7_DAYS
+}
+
+enum ReminderStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+// ==================== SETTINGS MODELS ====================
+
+model Setting {
+  id              String   @id @default(cuid())
+  key             String   @unique
+  value           String
+  description     String?
+  isSecret        Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([key])
+}
